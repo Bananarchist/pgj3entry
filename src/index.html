@@ -1,0 +1,29 @@
+<html>
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1">
+		<title>Gaem</title>
+		<script src="main.js"></script>
+		<link rel="stylesheet" href="index.css" />
+	</head>
+	<body>
+		<main id="gaem">
+				<p>You need to have javascript enabled to play this game</p>
+			<script>
+				const node = document.getElementById('gaem');
+				//add button with js
+				//if they can see it
+				//they can play the game
+				//otherwise they need JS to continue
+
+				const mountElm = () => {
+					const flags = Date.now();
+					const app = Elm.Main.init({node, flags});
+				};
+
+				mountElm();
+			</script>
+		</main>
+	</body>
+</html>
+

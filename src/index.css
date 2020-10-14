@@ -1,0 +1,117 @@
+html, body {
+	width: 100%;
+	margin: 0;
+	padding: 0;
+	height: 100%;
+}
+
+#gaem {
+	display: flex;
+	flex-flow: column;
+	margin: 0;
+	padding: 0;
+	width: 100%;
+	height: 100%;
+}
+
+#narrationScreen {
+	flex: 1 1 auto;
+	background: black;
+	color: wheat;
+	text-align: center;
+	width: 100%;
+}
+
+#titleScreen {
+	flex: 1 1 auto;
+	background: black;
+	color: white;
+	text-align: center;
+}
+
+#titleScreen ul {
+	list-style: none;
+	padding: 0;
+}
+
+#titleScreen ul li button {
+	border: none;
+}
+
+#danceScreen {
+	flex: 1 1 auto;
+	background: wheat;
+}
+
+#danceScreen #score {
+	float: right;
+}
+
+#danceScreen #settings {
+	float: left;
+}
+
+#danceScreen #dancers {
+	height: 25%;
+}
+
+.dancer {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -4000px;
+	transform-origin: top left;
+	transform: scale(.25);
+}
+
+.dancer.sprite_stand {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -4000px;
+}	
+
+.dancer.sprite_bow {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -3200px;
+}	
+
+.dancer.sprite_clap {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -2400px;
+}	
+
+.dancer.sprite_jump {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 0;
+}	
+
+.dancer.sprite_rightstep {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -800px;
+}	
+
+.dancer.sprite_leftstep {
+	height: 800px;
+	width: 600px;
+	background: no-repeat url(assets/sprites/dancer.png) 0 -1600px;
+}	
+
+
+
+#danceScreen #drummers {
+	background: blue;
+}
+
+#pauseScreen {
+	flex: 1 1 auto;
+	display: flex;
+	flex-flow: column;
+	color: wheat;
+	background: black;
+	text-align: center;
+	justify-content: center;
+}
+
