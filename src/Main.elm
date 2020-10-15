@@ -1,5 +1,6 @@
 module Main exposing (Model, Msg(..), init, main, subscriptions, update, view)
 
+import Animator
 import Browser
 import Browser.Events
 import Html exposing (..)
@@ -7,7 +8,8 @@ import Html.Attributes as Hats
 import Html.Events as Hevs
 import Json.Decode as Decode
 import Level exposing (..)
-import List exposing (head, tail)
+import List exposing ((::), concat, head, tail)
+import Sprites exposing (..)
 import Task
 import Time
 
@@ -29,20 +31,20 @@ introSong =
     ]
 
 
-
--- how long before/after for a dance move to be right
-
-
 tolerance =
     500.0
 
 
 
--- how long to wait before starting
+--ms range around beat for success
 
 
 introDelay =
-    2500
+    2
+
+
+
+--beats
 
 
 main =
@@ -55,11 +57,18 @@ main =
 
 
 subscriptions : Model -> Sub Msg
-subscriptions _ =
-    Sub.batch
-        [ Time.every 100 Tick
-        , Browser.Events.onKeyDown (Decode.map KeyPress keyDecoder)
-        ]
+subscriptions model =
+    let
+        subscription_list =
+            [ animator
+                |> Animator.toSubscription Tick model
+            , Time.every 100 Tick
+            , Browser.Events.onKeyDown (Decode.map KeyPress keyDecoder)
+            , Browser.Events.onAnimationFrameDelta Frame
+            , Time.every 1000 Beat
+            ]
+    in
+    Sub.batch subscription_list
 
 
 
@@ -120,24 +129,48 @@ type Key
 
 
 type Dancer
-    = Avatar Int Action
-    | Crowd Int Action
+    = Dancer Int Action
+
+
+type Robot
+    = Robot Int Action
+
+
+type Routine
+    = Routine Float (List Action)
 
 
 type alias Challenge =
     { action : Maybe Action
+    , attempt : Maybe Action
     , timing : Float
     , evaluation : Evaluation
     }
 
 
+type alias DancePhase =
+    { start : Float
+    , lastBeatTime : Float
+    , beat : Int
+    , paused : Bool
+    , challenge : Challenge
+    , routine : Routine
+    , dancer : Animator.Timeline Dancer
+    , robot : Animator.Timeline Robot
+    }
+
+
 type alias Model =
     { start : Float
-    , action : Action
+    , lastKey : Maybe Key
     , lastTick : Float
+    , lastBeatTime : Float
+    , beat : Int
+    , paused : Bool
     , challenge : Challenge
     , song : List Action
-    , dancer : Dancer
+    , dancer : Animator.Timeline Dancer
+    , robot : Animator.Timeline Dancer
     }
 
 
@@ -153,11 +186,15 @@ type alias Model =
 init : Int -> ( Model, Cmd Msg )
 init currentTime =
     ( { start = toFloat currentTime
-      , action = Idle
+      , lastKey = Nothing
+      , lastBeatTime = toFloat currentTime
+      , beat = introDelay * -1
       , lastTick = toFloat currentTime
-      , challenge = Challenge Nothing 0 Passed
+      , paused = False
+      , challenge = Challenge Nothing Nothing 0 Passed
       , song = introSong
-      , dancer = Avatar 0 Idle
+      , dancer = Animator.init (Dancer 0 Idle)
+      , robot = Animator.init (Dancer 0 Idle)
       }
     , Cmd.none
     )
@@ -166,49 +203,86 @@ init currentTime =
 type Msg
     = Tick Time.Posix
     | KeyPress Key
-    | Frame Time.Posix
+    | Frame Float
+    | Beat Time.Posix
+
+
+actionForKey : Key -> Action
+actionForKey k =
+    case k of
+        Larrow ->
+            Stepping Left
+
+        Rarrow ->
+            Stepping Right
+
+        Uarrow ->
+            Jumping
+
+        Darrow ->
+            Clapping
+
+        Noarrow ->
+            Idle
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
-        Frame p ->
+        Beat tp ->
             let
                 t =
-                    p |> Time.posixToMillis |> toFloat
+                    tp
+                        |> Time.posixToMillis
+                        |> toFloat
+
+                newBeatTime =
+                    if beat >= 0 then
+                        let
+                            tdelta =
+                                (model.lastBeatTime + 1000) - t
+
+                            divisor =
+                                if tdelta >= 0 then
+                                    2
+
+                                else
+                                    -2
+
+                            avgdelta =
+                                tdelta / divisor
+                        in
+                        model.lastBeatTime + 1000 + avgdelta
+
+                    else
+                        model.lastBeatTime
+
+                beat =
+                    model.beat + 1
             in
+            ( { model | lastBeatTime = newBeatTime, beat = beat }
+            , Cmd.none
+            )
+
+        Frame delta ->
             ( model
+                |> updateSprites
             , Cmd.none
             )
 
         KeyPress k ->
             let
-                action =
-                    case k of
-                        Larrow ->
-                            Stepping Left
+                oldChallenge =
+                    model.challenge
 
-                        Rarrow ->
-                            Stepping Right
+                newChallenge =
+                    if oldChallenge.action == Nothing || oldChallenge.evaluation == Failed then
+                        oldChallenge
 
-                        Uarrow ->
-                            Jumping
-
-                        Darrow ->
-                            Clapping
-
-                        Noarrow ->
-                            Idle
-
-                offset =
-                    case model.dancer of
-                        Avatar x a ->
-                            x
-
-                        Crowd x a ->
-                            x
+                    else
+                        { oldChallenge | attempt = Just (actionForKey k) }
             in
-            ( { model | action = action, dancer = Avatar offset action }
+            ( { model | lastKey = Just k, challenge = newChallenge }
             , Cmd.none
             )
 
@@ -230,109 +304,277 @@ update msg model =
                     tInMs
 
                 newSong =
-                    case model.challenge.evaluation of
-                        Failed ->
-                            []
-
-                        Indeterminate ->
-                            model.song
-
-                        Passed ->
-                            let
-                                tailOfSong =
-                                    tail model.song
-                            in
-                            case tailOfSong of
-                                Just songTail ->
-                                    songTail
-
-                                Nothing ->
-                                    []
+                    model.song
 
                 newChallenge =
-                    case model.challenge.evaluation of
-                        Passed ->
-                            nextChallenge model
+                    let
+                        earliestTiming =
+                            model.challenge.timing - tolerance
 
-                        Indeterminate ->
-                            let
-                                earliestTiming =
-                                    model.challenge.timing - tolerance
+                        latestTiming =
+                            model.challenge.timing + tolerance
 
-                                latestTiming =
-                                    model.challenge.timing + tolerance
+                        withinWindow =
+                            tInMs >= earliestTiming && tInMs <= latestTiming
+                    in
+                    if model.beat >= 0 then
+                        case model.challenge.evaluation of
+                            Passed ->
+                                if model.challenge.action == Nothing || not withinWindow then
+                                    nextChallenge model
 
-                                newEval =
-                                    case model.action of
-                                        Idle ->
-                                            if tInMs <= latestTiming then
-                                                Indeterminate
-
-                                            else
-                                                Failed
-
-                                        _ ->
-                                            case model.challenge.action of
-                                                Just a ->
-                                                    if model.action == a then
-                                                        if tInMs <= latestTiming && tInMs >= earliestTiming then
-                                                            Passed
-
-                                                        else
-                                                            Failed
-
-                                                    else
-                                                        Failed
-
-                                                Nothing ->
-                                                    Indeterminate
-
-                                curChallenge =
+                                else
                                     model.challenge
-                            in
-                            { curChallenge | evaluation = newEval }
 
-                        Failed ->
-                            model.challenge
+                            Indeterminate ->
+                                let
+                                    newEval =
+                                        evaluationForIndeterminateChallenge model.challenge tInMs
+
+                                    curChallenge =
+                                        model.challenge
+                                in
+                                { curChallenge | evaluation = newEval }
+
+                            Failed ->
+                                model.challenge
+
+                    else
+                        model.challenge
 
                 newModel =
                     { model
                         | song = newSong
-                        , action = Idle
                         , lastTick = newLastTick
                         , start = newStartTime
                         , challenge = newChallenge
                     }
             in
             ( newModel
+                |> Animator.update t animator
             , Cmd.none
             )
+
+
+evaluationForIndeterminateChallenge challenge currentTime =
+    let
+        earliestTiming =
+            challenge.timing - tolerance
+
+        latestTiming =
+            challenge.timing + tolerance
+
+        beforeTestWindow =
+            currentTime < earliestTiming
+
+        afterTestWindow =
+            currentTime > latestTiming
+
+        withinTestWindow =
+            not (afterTestWindow || beforeTestWindow)
+
+        idleForAction =
+            challenge.action == Just Idle
+    in
+    if challenge.attempt == challenge.action then
+        if withinTestWindow then
+            Passed
+
+        else
+            Failed
+
+    else
+        case challenge.attempt of
+            Nothing ->
+                if afterTestWindow then
+                    if not idleForAction then
+                        Failed
+
+                    else
+                        Passed
+
+                else
+                    Indeterminate
+
+            Just _ ->
+                Failed
+
+
+
+-- just add the total pause time to start time on resume
+
+
+getActionForBeat : List Action -> Float -> Float -> Int -> Maybe Action
+getActionForBeat song bpm fromTime forBeat =
+    let
+        msPerBeat =
+            bpm * 60 * 1000
+
+        startPlusOneBeat =
+            fromTime + msPerBeat
+
+        andForOneLessBeat =
+            forBeat - 1
+
+        songTail =
+            case tail song of
+                Just s ->
+                    s
+
+                Nothing ->
+                    [ Idle ]
+    in
+    if forBeat > 1 then
+        getActionForBeat songTail bpm startPlusOneBeat andForOneLessBeat
+
+    else
+        head song
+
+
+idleIfBeatSubZero beat action =
+    if beat < 0 then
+        Just Idle
+
+    else
+        action
 
 
 nextChallenge : Model -> Challenge
 nextChallenge model =
     let
         timing =
-            model.lastTick + 1000
+            model.lastBeatTime + 1000
 
-        queued =
-            head model.song
+        challengeBeat =
+            model.beat + 1
 
         nextAction =
-            queued
+            getActionForBeat model.song 60 model.start challengeBeat
+                |> idleIfBeatSubZero challengeBeat
 
         nextEval =
-            case queued of
+            case nextAction of
                 Just _ ->
                     Indeterminate
 
                 Nothing ->
                     Passed
+
+        attempt =
+            Nothing
     in
     { action = nextAction
+    , attempt = attempt
     , timing = timing
     , evaluation = nextEval
     }
+
+
+animator : Animator.Animator Model
+animator =
+    Animator.animator
+        |> Animator.watching .dancer (\dancer m -> { m | dancer = dancer })
+        |> Animator.watching .robot (\robot m -> { m | robot = robot })
+
+
+updateSprites : Model -> Model
+updateSprites model =
+    let
+        current =
+            Animator.current model.dancer
+
+        offset =
+            case current of
+                Dancer o _ ->
+                    o
+
+        action =
+            case model.lastKey of
+                Just a ->
+                    actionForKey a
+
+                Nothing ->
+                    Idle
+
+        newDancer =
+            Dancer offset action
+
+        crobot =
+            Animator.current model.robot
+
+        roffset =
+            case crobot of
+                Dancer o _ ->
+                    o
+
+        animbeat =
+            model.beat - 1
+
+        raction =
+            let
+                actionForBeat =
+                    getActionForBeat model.song 60 model.start animbeat
+                        |> idleIfBeatSubZero animbeat
+            in
+            case actionForBeat of
+                Just a ->
+                    a
+
+                Nothing ->
+                    Idle
+
+        newRobot =
+            Dancer roffset raction
+
+        updateRobot =
+            if model.start > 0.0 && crobot /= newRobot then
+                model.robot |> Animator.go Animator.immediately newRobot
+
+            else
+                model.robot
+
+        updateDancer =
+            if model.start > 0.0 && current /= newDancer then
+                model.dancer |> Animator.go Animator.immediately newDancer
+
+            else
+                model.dancer
+    in
+    { model | dancer = updateDancer, robot = updateRobot }
+
+
+nextMoveIndicatorText : Challenge -> String
+nextMoveIndicatorText challenge =
+    case challenge.evaluation of
+        Passed ->
+            "NICE!"
+
+        Indeterminate ->
+            case challenge.action of
+                Just s ->
+                    case s of
+                        Stepping d ->
+                            case d of
+                                Left ->
+                                    "Step left!"
+
+                                Right ->
+                                    "Step right!"
+
+                        Jumping ->
+                            "Jump!"
+
+                        Clapping ->
+                            "Clap!"
+
+                        Idle ->
+                            "Wait for it..."
+
+                Nothing ->
+                    "Wait for it..."
+
+        Failed ->
+            "Miss! :("
 
 
 
@@ -344,57 +586,99 @@ view : Model -> Html Msg
 view model =
     let
         next_move =
-            case model.challenge.evaluation of
-                Passed ->
-                    "NICE!"
+            if model.beat >= 0 then
+                nextMoveIndicatorText model.challenge
 
-                Indeterminate ->
-                    case model.challenge.action of
-                        Just s ->
-                            case s of
-                                Stepping d ->
-                                    case d of
-                                        Left ->
-                                            "Step left!"
-
-                                        Right ->
-                                            "Step right!"
-
-                                Jumping ->
-                                    "Jump!"
-
-                                Clapping ->
-                                    "Clap!"
-
-                                Idle ->
-                                    "Wait for it..."
-
-                        Nothing ->
-                            "Wait for it..."
-
-                Failed ->
-                    "Miss! :("
+            else
+                String.fromInt model.beat
     in
     main_ [ Hats.id "gaem" ]
         [ section [ Hats.id "danceScreen" ]
             [ div [ Hats.id "dancers" ]
-                [ dancer model.dancer ]
+                (concat
+                    [ List.repeat 3 (viewSprite (Animator.step model.robot <| spriteAnim))
+                    , [ viewSprite (Animator.step model.dancer <| spriteAnim) ]
+                    , List.repeat 3 (viewSprite (Animator.step model.robot <| spriteAnim))
+                    ]
+                )
             , div [ Hats.id "drummers" ]
                 [ text next_move ]
             ]
         ]
 
 
-dancer : Dancer -> Html Msg
+spriteAnim (Dancer offset action) =
+    let
+        frame mySprite =
+            Animator.frame mySprite
+
+        directional dir mySprite =
+            case dir of
+                Left ->
+                    translated 150 0 { mySprite | flipX = True }
+
+                Right ->
+                    mySprite
+
+        translated xoffset yoffset mySprite =
+            { mySprite | adjustX = xoffset, adjustY = yoffset }
+    in
+    case action of
+        Idle ->
+            frame sprite.tail.idle
+
+        Clapping ->
+            Animator.framesWith
+                { transition = frame sprite.tail.idle
+                , resting =
+                    Animator.cycleN 1
+                        (Animator.fps 5)
+                        [ frame sprite.tail.clap1
+                        , frame sprite.tail.clap2
+                        , frame sprite.tail.idle
+                        ]
+                }
+
+        Jumping ->
+            Animator.framesWith
+                { transition = frame sprite.tail.idle
+                , resting =
+                    Animator.cycleN 1
+                        (Animator.fps 5)
+                        (List.map frame
+                            [ translated 0 20 sprite.tail.jump1
+                            , sprite.tail.jump2
+                            , translated 0 -20 sprite.tail.jump3
+                            , sprite.tail.idle
+                            ]
+                        )
+                }
+
+        Stepping dir ->
+            Animator.framesWith
+                { transition = frame sprite.tail.idle
+                , resting =
+                    Animator.cycleN 1
+                        (Animator.fps 5)
+                        (List.map (frame << directional dir)
+                            [ sprite.tail.step1
+                            , sprite.tail.step2
+                            , sprite.tail.idle
+                            ]
+                        )
+                }
+
+
+{-| dancer : Dancer -> Html Msg
 dancer d =
-    case d of
-        Avatar offset action ->
-            div [ Hats.class "dancer", action |> actionClass |> Hats.class ] []
+case d of
+Dancer offset action ->
+div [ Hats.class "dancer", action |> actionClass |> Hats.class ]
 
         Crowd offset action ->
             div [ Hats.class "dancer", action |> actionClass |> Hats.class ] []
 
-
+-}
 actionClass : Action -> String
 actionClass action =
     let

@@ -41,6 +41,9 @@ html, body {
 #danceScreen {
 	flex: 1 1 auto;
 	background: wheat;
+	display: flex;
+	flex-direction: column;
+	place-items: center;
 }
 
 #danceScreen #score {
@@ -52,57 +55,24 @@ html, body {
 }
 
 #danceScreen #dancers {
-	height: 25%;
+	display: flex;
+	place-content: center;	
+	height: 200px;
+	flex: 1 0 auto;
+	place-items: center;
 }
 
 .dancer {
-	height: 800px;
-	width: 600px;
+	
 	background: no-repeat url(assets/sprites/dancer.png) 0 -4000px;
 	transform-origin: top left;
-	transform: scale(.25);
 }
-
-.dancer.sprite_stand {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 -4000px;
-}	
-
-.dancer.sprite_bow {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 -3200px;
-}	
-
-.dancer.sprite_clap {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 -2400px;
-}	
-
-.dancer.sprite_jump {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 0;
-}	
-
-.dancer.sprite_rightstep {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 -800px;
-}	
-
-.dancer.sprite_leftstep {
-	height: 800px;
-	width: 600px;
-	background: no-repeat url(assets/sprites/dancer.png) 0 -1600px;
-}	
-
 
 
 #danceScreen #drummers {
-	background: blue;
+		color: brown;
+		font-size: 2em;
+		flex: 1 0 auto;
 }
 
 #pauseScreen {
