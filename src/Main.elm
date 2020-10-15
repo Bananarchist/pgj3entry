@@ -12,6 +12,7 @@ import List exposing ((::), concat, head, tail)
 import Sprites exposing (..)
 import Task
 import Time
+import Tuple exposing (first, second)
 
 
 
@@ -61,7 +62,7 @@ subscriptions model =
     let
         subscription_list =
             [ animator
-                |> Animator.toSubscription Tick model
+                |> Animator.toSubscription Tick model.dmodel
             , Time.every 100 Tick
             , Browser.Events.onKeyDown (Decode.map KeyPress keyDecoder)
             , Browser.Events.onAnimationFrameDelta Frame
@@ -136,8 +137,10 @@ type Robot
     = Robot Int Action
 
 
-type Routine
-    = Routine Float (List Action)
+type alias Routine =
+    { bpm : Float
+    , song : List Action
+    }
 
 
 type Screen
@@ -160,24 +163,12 @@ type Phase
 type alias Challenge =
     { action : Maybe Action
     , attempt : Maybe Action
-    , timing : Float
+    , timing : ( Float, Float )
     , evaluation : Evaluation
     }
 
 
 type alias DanceModel =
-    { start : Float
-    , lastBeatTime : Float
-    , beat : Int
-    , paused : Bool
-    , challenge : Challenge
-    , routine : Routine
-    , dancer : Animator.Timeline Dancer
-    , robot : Animator.Timeline Robot
-    }
-
-
-type alias Model =
     { start : Float
     , lastKey : Maybe Key
     , lastTick : Float
@@ -185,9 +176,14 @@ type alias Model =
     , beat : Int
     , paused : Bool
     , challenge : Challenge
-    , song : List Action
+    , routine : Routine
     , dancer : Animator.Timeline Dancer
     , robot : Animator.Timeline Dancer
+    }
+
+
+type alias Model =
+    { dmodel : DanceModel
     }
 
 
@@ -202,17 +198,25 @@ type alias Model =
 
 init : Int -> ( Model, Cmd Msg )
 init currentTime =
-    ( { start = toFloat currentTime
-      , lastKey = Nothing
-      , lastBeatTime = toFloat currentTime
-      , beat = introDelay * -1
-      , lastTick = toFloat currentTime
-      , paused = False
-      , challenge = Challenge Nothing Nothing 0 Passed
-      , song = introSong
-      , dancer = Animator.init (Dancer 0 Idle)
-      , robot = Animator.init (Dancer 0 Idle)
-      }
+    let
+        ctime =
+            currentTime |> toFloat
+
+        dmodel : DanceModel
+        dmodel =
+            { start = ctime
+            , lastKey = Nothing
+            , lastBeatTime = ctime
+            , beat = introDelay * -1
+            , lastTick = ctime
+            , paused = False
+            , challenge = Challenge Nothing Nothing ( ctime, ctime + (1000 * introDelay) ) Passed
+            , routine = Routine 60.0 introSong
+            , dancer = Animator.init (Dancer 0 Idle)
+            , robot = Animator.init (Dancer 0 Idle)
+            }
+    in
+    ( { dmodel = dmodel }
     , Cmd.none
     )
 
@@ -243,8 +247,8 @@ actionForKey k =
             Idle
 
 
-update : Msg -> Model -> ( Model, Cmd Msg )
-update msg model =
+updateDanceModel : Msg -> DanceModel -> DanceModel
+updateDanceModel msg model =
     case msg of
         Beat tp ->
             let
@@ -252,6 +256,130 @@ update msg model =
                     tp
                         |> Time.posixToMillis
                         |> toFloat
+
+                newBeatTime =
+                    if beat >= 0 then
+                        let
+                            tdelta =
+                                (model.lastBeatTime + 1000) - t
+
+                            divisor =
+                                if tdelta >= 0 then
+                                    2
+
+                                else
+                                    -2
+
+                            avgdelta =
+                                tdelta / divisor
+                        in
+                        model.lastBeatTime + 1000 + avgdelta
+
+                    else
+                        model.lastBeatTime
+
+                beat =
+                    model.beat + 1
+            in
+            { model | lastBeatTime = newBeatTime, beat = beat }
+
+        Frame delta ->
+            model
+                |> updateSprites
+
+        KeyPress k ->
+            let
+                oldChallenge =
+                    model.challenge
+
+                newChallenge =
+                    if oldChallenge.action == Nothing || oldChallenge.evaluation == Failed then
+                        oldChallenge
+
+                    else
+                        { oldChallenge | attempt = Just (actionForKey k) }
+            in
+            { model | lastKey = Just k, challenge = newChallenge }
+
+        Tick t ->
+            let
+                tInMs =
+                    t
+                        |> Time.posixToMillis
+                        |> toFloat
+
+                newStartTime =
+                    if model.start == 0.0 then
+                        tInMs
+
+                    else
+                        model.start
+
+                newLastTick =
+                    tInMs
+
+                newSong =
+                    model.routine.song
+
+                newChallenge =
+                    let
+                        withinWindow =
+                            tInMs >= first model.challenge.timing && tInMs <= second model.challenge.timing
+                    in
+                    if model.beat >= 0 then
+                        case model.challenge.evaluation of
+                            Passed ->
+                                if model.challenge.action == Nothing || not withinWindow then
+                                    nextChallenge model
+
+                                else
+                                    model.challenge
+
+                            Indeterminate ->
+                                let
+                                    newEval =
+                                        evaluationForIndeterminateChallenge model.challenge tInMs
+
+                                    curChallenge =
+                                        model.challenge
+                                in
+                                { curChallenge | evaluation = newEval }
+
+                            Failed ->
+                                model.challenge
+
+                    else
+                        model.challenge
+
+                newModel =
+                    { model
+                        | lastTick = newLastTick
+                        , start = newStartTime
+                        , challenge = newChallenge
+                    }
+            in
+            newModel
+                |> Animator.update t animator
+
+
+update : Msg -> Model -> ( Model, Cmd Msg )
+update msg model =
+    let
+        dmodel =
+            updateDanceModel msg model.dmodel
+    in
+    ( { model | dmodel = dmodel }
+    , Cmd.none
+    )
+
+
+{-| case msg of
+Beat tp ->
+let
+t =
+tp
+|> Time.posixToMillis
+|> toFloat
 
                 newBeatTime =
                     if beat >= 0 then
@@ -325,14 +453,8 @@ update msg model =
 
                 newChallenge =
                     let
-                        earliestTiming =
-                            model.challenge.timing - tolerance
-
-                        latestTiming =
-                            model.challenge.timing + tolerance
-
                         withinWindow =
-                            tInMs >= earliestTiming && tInMs <= latestTiming
+                            tInMs >= first model.challenge.timing && tInMs <= second model.challenge.timing
                     in
                     if model.beat >= 0 then
                         case model.challenge.evaluation of
@@ -372,20 +494,14 @@ update msg model =
             , Cmd.none
             )
 
-
+-}
 evaluationForIndeterminateChallenge challenge currentTime =
     let
-        earliestTiming =
-            challenge.timing - tolerance
-
-        latestTiming =
-            challenge.timing + tolerance
-
         beforeTestWindow =
-            currentTime < earliestTiming
+            currentTime < first challenge.timing
 
         afterTestWindow =
-            currentTime > latestTiming
+            currentTime > second challenge.timing
 
         withinTestWindow =
             not (afterTestWindow || beforeTestWindow)
@@ -456,17 +572,20 @@ idleIfBeatSubZero beat action =
         action
 
 
-nextChallenge : Model -> Challenge
+nextChallenge : DanceModel -> Challenge
 nextChallenge model =
     let
-        timing =
+        beatTiming =
             model.lastBeatTime + 1000
+
+        timing =
+            ( beatTiming - tolerance, beatTiming + tolerance )
 
         challengeBeat =
             model.beat + 1
 
         nextAction =
-            getActionForBeat model.song 60 model.start challengeBeat
+            getActionForBeat model.routine.song 60 model.start challengeBeat
                 |> idleIfBeatSubZero challengeBeat
 
         nextEval =
@@ -487,14 +606,14 @@ nextChallenge model =
     }
 
 
-animator : Animator.Animator Model
+animator : Animator.Animator DanceModel
 animator =
     Animator.animator
         |> Animator.watching .dancer (\dancer m -> { m | dancer = dancer })
         |> Animator.watching .robot (\robot m -> { m | robot = robot })
 
 
-updateSprites : Model -> Model
+updateSprites : DanceModel -> DanceModel
 updateSprites model =
     let
         current =
@@ -530,7 +649,7 @@ updateSprites model =
         raction =
             let
                 actionForBeat =
-                    getActionForBeat model.song 60 model.start animbeat
+                    getActionForBeat model.routine.song 60 model.start animbeat
                         |> idleIfBeatSubZero animbeat
             in
             case actionForBeat of
@@ -601,6 +720,16 @@ nextMoveIndicatorText challenge =
 
 view : Model -> Html Msg
 view model =
+    let
+        screen =
+            viewDance model.dmodel
+    in
+    main_ [ Hats.id "gaem" ]
+        [ screen ]
+
+
+viewDance : DanceModel -> Html Msg
+viewDance model =
     let
         next_move =
             if model.beat >= 0 then
