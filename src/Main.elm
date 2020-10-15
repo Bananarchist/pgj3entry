@@ -140,6 +140,23 @@ type Routine
     = Routine Float (List Action)
 
 
+type Screen
+    = GameScreen Phase
+    | MenuScreen Menu
+
+
+type Menu
+    = Title
+    | Options
+    | Scores
+    | Credits
+
+
+type Phase
+    = Narrative Level
+    | Dancing DanceModel
+
+
 type alias Challenge =
     { action : Maybe Action
     , attempt : Maybe Action
@@ -148,7 +165,7 @@ type alias Challenge =
     }
 
 
-type alias DancePhase =
+type alias DanceModel =
     { start : Float
     , lastBeatTime : Float
     , beat : Int
