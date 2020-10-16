@@ -18,40 +18,58 @@ type alias Config =
     }
 
 
-keyDecoder : Decode.Decoder Key
-keyDecoder =
-    Decode.map toKey (Decode.field "key" Decode.string)
-
-
 defaultConfig : Config
 defaultConfig =
     { larrow = ArrowMap Larrow "ArrowLeft"
-    , rarrow = ArrowMap Larrow "ArrowLeft"
-    , darrow = ArrowMap Larrow "ArrowLeft"
-    , uarrow = ArrowMap Larrow "ArrowLeft"
+    , rarrow = ArrowMap Rarrow "ArrowRight"
+    , darrow = ArrowMap Darrow "ArrowDown"
+    , uarrow = ArrowMap Uarrow "ArrowUp"
     , bpm = 1.0
     , tolerance = 0.5
     , countin = 2
     }
 
 
-toKey : String -> Key
-toKey string =
-    case string of
-        "ArrowLeft" ->
-            Larrow
+stringForArrowMapping : ArrowMap -> String
+stringForArrowMapping m =
+    case m of
+        ArrowMap _ s ->
+            s
 
-        "ArrowRight" ->
-            Rarrow
 
-        "ArrowDown" ->
-            Darrow
+toKey : Config -> String -> Key
+toKey config string =
+    let
+        arrowLeft =
+            stringForArrowMapping config.larrow
+                |> (==) string
 
-        "ArrowUp" ->
-            Uarrow
+        arrowRight =
+            stringForArrowMapping config.rarrow
+                |> (==) string
 
-        _ ->
-            Noarrow
+        arrowDown =
+            stringForArrowMapping config.darrow
+                |> (==) string
+
+        arrowUp =
+            stringForArrowMapping config.uarrow
+                |> (==) string
+    in
+    if arrowLeft then
+        Larrow
+
+    else if arrowRight then
+        Rarrow
+
+    else if arrowDown then
+        Darrow
+
+    else if arrowUp then
+        Uarrow
+
+    else
+        Noarrow
 
 
 type Key

@@ -123,3 +123,33 @@ html, body {
 	justify-content: center;
 }
 
+#creditsScreen {
+	display: flex;
+	flex: 1 1 auto;
+	justify-content: center;
+	flex-flow: column;
+	align-items: center;
+	background: black;
+	color: red;
+}
+
+#settingsScreen {
+	display: flex;
+	flex: 1 1 auto;
+	flex-flow: column;
+	align-items: center;
+}
+
+
+#settingsScreen div {
+		display: grid;
+		grid-auto-rows: auto;
+}
+
+
+.backToTitle {
+	position: fixed;
+	top: 1em;
+	left: 1em;
+	content: "Back"
+}

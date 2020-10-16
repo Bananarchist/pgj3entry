@@ -4,6 +4,7 @@ import Action exposing (..)
 import Animator
 import Browser
 import Browser.Events
+import Config exposing (..)
 import Html exposing (..)
 import Html.Attributes as Hats
 import Html.Events as Hevs
@@ -18,13 +19,6 @@ import Tuple exposing (first, second)
 
 
 -- constants
-
-
-tolerance =
-    500.0
-
-
-
 --ms range around beat for success
 
 
@@ -45,6 +39,11 @@ main =
         }
 
 
+keyDecoder : Config -> Decode.Decoder Key
+keyDecoder config =
+    Decode.map (toKey config) (Decode.field "key" Decode.string)
+
+
 subscriptions : Model -> Sub Msg
 subscriptions model =
     let
@@ -52,43 +51,12 @@ subscriptions model =
             [ animator
                 |> Animator.toSubscription Tick model.dmodel
             , Time.every 100 Tick
-            , Browser.Events.onKeyDown (Decode.map KeyPress keyDecoder)
+            , Browser.Events.onKeyDown (Decode.map KeyPress (keyDecoder model.config))
             , Browser.Events.onAnimationFrameDelta Frame
             , Time.every 1000 Beat
             ]
     in
     Sub.batch subscription_list
-
-
-
--- Browser.Events.onAnimationFrame
---
--- on Frame event. take action and to make animation
--- then set to idle... right?
-
-
-keyDecoder : Decode.Decoder Key
-keyDecoder =
-    Decode.map toKey (Decode.field "key" Decode.string)
-
-
-toKey : String -> Key
-toKey string =
-    case string of
-        "ArrowLeft" ->
-            Larrow
-
-        "ArrowRight" ->
-            Rarrow
-
-        "ArrowDown" ->
-            Darrow
-
-        "ArrowUp" ->
-            Uarrow
-
-        _ ->
-            Noarrow
 
 
 type Evaluation
@@ -97,20 +65,8 @@ type Evaluation
     | Indeterminate
 
 
-type Key
-    = Larrow
-    | Rarrow
-    | Darrow
-    | Uarrow
-    | Noarrow
-
-
 type Dancer
     = Dancer Int Action
-
-
-type Robot
-    = Robot Int Action
 
 
 type Screen
@@ -181,16 +137,8 @@ type alias Model =
     { screen : Screen
     , level : Level
     , dmodel : DanceModel
+    , config : Config
     }
-
-
-
-{- With this model we
-   -- Check Action
-   -- If Nothing move on
-   -- Else check run animation
-   -- Test against song...?
--}
 
 
 init : Int -> ( Model, Cmd Msg )
@@ -216,6 +164,7 @@ init currentTime =
     ( { screen = MenuScreen Title
       , level = Introduction
       , dmodel = dmodel
+      , config = defaultConfig
       }
     , Cmd.none
     )
@@ -346,7 +295,7 @@ updateDanceModel msg parentmodel =
                                         case model.challenge.evaluation of
                                             Passed ->
                                                 if model.challenge.action == Nothing || not withinWindow then
-                                                    nextChallenge model
+                                                    nextChallenge parentmodel
 
                                                 else
                                                     model.challenge
@@ -427,8 +376,8 @@ update msg model =
                                 |> danceModelLastTickFrom dmodel.lastTick
                                 |> danceModelStartFrom dmodel.lastTick
                                 |> (\d -> { d | beat = introDelay * -1 })
-                                |> (\d -> { d | lastBeatTime = dmodel.lastBeatTime })
-                                |> (\d -> { d | challenge = Challenge Nothing Nothing ( 0, 0 ) Indeterminate })
+                                |> (\d -> { d | lastBeatTime = dmodel.lastTick })
+                                |> (\d -> { d | challenge = Challenge Nothing Nothing ( 0, 0 ) Passed })
                     in
                     ( { model
                         | dmodel = newdmodel
@@ -525,14 +474,17 @@ idleIfBeatSubZero beat action =
         action
 
 
-nextChallenge : DanceModel -> Challenge
-nextChallenge model =
+nextChallenge : Model -> Challenge
+nextChallenge mainmodel =
     let
+        model =
+            mainmodel.dmodel
+
         beatTiming =
             model.lastBeatTime + 1000
 
         timing =
-            ( beatTiming - tolerance, beatTiming + tolerance )
+            ( beatTiming - mainmodel.config.tolerance, beatTiming + mainmodel.config.tolerance )
 
         challengeBeat =
             model.beat + 1
@@ -677,7 +629,7 @@ view model =
                             viewTitle model
 
                         Options ->
-                            viewSettings
+                            viewSettings model
 
                         Scores ->
                             viewScores
@@ -714,25 +666,51 @@ titleMenu model =
     ul []
         [ li [] [ button [ Hevs.onClick (StartStory Introduction) ] [ text "begin" ] ]
         , li [] [ button [ Hevs.onClick (StartGame continuedmodel) ] [ text "continue" ] ]
-        , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Options)) ] [ text "change options" ] ]
-        , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Scores)) ] [ text "review attempts" ] ]
+        , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Options)) ] [ text "options" ] ]
+
+        --, li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Scores)) ] [ text "review attempts" ] ]
         , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Credits)) ] [ text "credits" ] ]
         ]
 
 
-viewSettings : Html Msg
-viewSettings =
-    section [ Hats.id "settingsScreen" ] [ text "Change game settings?" ]
+backToTitleBtn =
+    button [ Hats.class "backToTitle", Hevs.onClick (ScreenTransition (MenuScreen Title)) ] [ text (String.fromChar (Char.fromCode 8592)) ]
+
+
+viewSettings : Model -> Html Msg
+viewSettings model =
+    section [ Hats.id "settingsScreen" ]
+        [ backToTitleBtn
+        , h1 [] [ text "Update settings" ]
+        , div []
+            (concat
+                [ settingsLabel (input [ Hats.value (stringForArrowMapping model.config.larrow) ] []) "Left Step Key"
+                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Right Step Key"
+                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Jump Key"
+                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Clap Key"
+                , settingsLabel (input [ Hats.value (String.fromFloat model.config.bpm) ] []) "BPM Multiplier"
+                , settingsLabel (input [ Hats.value (String.fromFloat model.config.tolerance) ] []) "Accuracy tolerance"
+                , settingsLabel (input [ Hats.value (String.fromInt model.config.countin) ] []) "Count-in"
+                ]
+            )
+        ]
+
+
+settingsLabel : Html Msg -> String -> List (Html Msg)
+settingsLabel input string =
+    [ label [] [ text string ]
+    , input
+    ]
 
 
 viewScores : Html Msg
 viewScores =
-    section [ Hats.id "scoresScreen" ] [ text "Nobody has scored anything yet" ]
+    section [ Hats.id "scoresScreen" ] [ backToTitleBtn, text "Nobody has scored anything yet" ]
 
 
 viewCredits : Html Msg
 viewCredits =
-    section [ Hats.id "creditsScreen" ] [ text "ALL CREDIT TO ZACHARIAH" ]
+    section [ Hats.id "creditsScreen" ] [ backToTitleBtn, h1 [] [ text "ALL CREDIT TO THE BANANARCHIST" ] ]
 
 
 viewNarrative : Model -> Html Msg
