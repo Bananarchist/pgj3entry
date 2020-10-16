@@ -20,6 +20,22 @@ html, body {
 	color: wheat;
 	text-align: center;
 	width: 100%;
+	display: flex;
+	flex-flow: column;
+	place-content: space-between;
+}
+
+#narrationScreen button {
+	background: transparent;
+	color: red;
+	border: none;
+	font-size: 1.25em;
+}
+
+
+#narrationScreen h1 {
+	flex: 1 1 auto;
+
 }
 
 #titleScreen {
@@ -27,6 +43,28 @@ html, body {
 	background: black;
 	color: white;
 	text-align: center;
+	display: flex;
+	flex-flow: column;
+}
+
+#titleScreen h1 {
+	font-size: 4em;
+	flex: 1 1 auto;
+}
+
+#titleScreen button {
+	font-size: 1.25em;
+	border: none;
+	color: red;
+	background: transparent;
+	margin: .25em;
+	padding-bottom: 1px;
+}
+
+#titleScreen button:hover {
+	cursor: pointer;
+	border-bottom: solid 1px grey;
+	padding-bottom: 0px;
 }
 
 #titleScreen ul {
