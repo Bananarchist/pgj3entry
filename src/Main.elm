@@ -17,19 +17,6 @@ import Time
 import Tuple exposing (first, second)
 
 
-
--- constants
---ms range around beat for success
-
-
-introDelay =
-    2
-
-
-
---beats
-
-
 main =
     Browser.element
         { init = init
@@ -44,6 +31,11 @@ keyDecoder config =
     Decode.map (toKey config) (Decode.field "key" Decode.string)
 
 
+keyPassThrough : Decode.Decoder String
+keyPassThrough =
+    Decode.map (\s -> s) (Decode.field "key" Decode.string)
+
+
 subscriptions : Model -> Sub Msg
 subscriptions model =
     let
@@ -51,9 +43,11 @@ subscriptions model =
             [ animator
                 |> Animator.toSubscription Tick model.dmodel
             , Time.every 100 Tick
-            , Browser.Events.onKeyDown (Decode.map KeyPress (keyDecoder model.config))
+            , Browser.Events.onKeyDown (Decode.map KeyPress (Decode.field "key" Decode.string))
+
+            --, Browser.Events.onKeyDown (Decode.map KeyPress (keyDecoder model.config))
             , Browser.Events.onAnimationFrameDelta Frame
-            , Time.every 1000 Beat
+            , Time.every (60000 / model.dmodel.routine.bpm * model.config.bpm) Beat
             ]
     in
     Sub.batch subscription_list
@@ -76,7 +70,7 @@ type Screen
 
 type Menu
     = Title
-    | Options
+    | Options (Maybe Key)
     | Scores
     | Credits
 
@@ -105,6 +99,7 @@ type alias DanceModel =
     , routine : Routine
     , dancer : Animator.Timeline Dancer
     , robot : Animator.Timeline Dancer
+    , score : Int
     }
 
 
@@ -114,12 +109,13 @@ danceModelFor routine =
     , lastKey = Nothing
     , lastTick = 0
     , lastBeatTime = 0
-    , beat = introDelay * -1
+    , beat = 0
     , paused = False
     , challenge = Challenge Nothing Nothing ( 0, 0 ) Indeterminate
     , routine = routine
     , dancer = Animator.init (Dancer 0 Idle)
     , robot = Animator.init (Dancer 0 Idle)
+    , score = 0
     }
 
 
@@ -152,13 +148,14 @@ init currentTime =
             { start = ctime
             , lastKey = Nothing
             , lastBeatTime = ctime
-            , beat = introDelay * -1
+            , beat = 0
             , lastTick = ctime
             , paused = False
-            , challenge = Challenge Nothing Nothing ( ctime, ctime + (1000 * introDelay) ) Passed
+            , challenge = Challenge Nothing Nothing ( ctime, ctime + 1000 ) Passed
             , routine = routineFor Introduction
             , dancer = Animator.init (Dancer 0 Idle)
             , robot = Animator.init (Dancer 0 Idle)
+            , score = 0
             }
     in
     ( { screen = MenuScreen Title
@@ -198,152 +195,240 @@ justLastTick msg dmodel =
             dmodel
 
 
-updateDanceModel : Msg -> Model -> DanceModel
-updateDanceModel msg parentmodel =
+withDanceModelForMsg : Msg -> Model -> Model
+withDanceModelForMsg msg parentmodel =
     let
         model =
             parentmodel.dmodel
-    in
-    case parentmodel.screen of
-        MenuScreen _ ->
-            justLastTick msg model
 
-        GameScreen phase ->
-            case phase of
-                Narrative ->
+        dmodel =
+            case parentmodel.screen of
+                MenuScreen _ ->
                     justLastTick msg model
 
-                Dancing ->
-                    case msg of
-                        Beat tp ->
-                            let
-                                t =
-                                    tp
-                                        |> Time.posixToMillis
-                                        |> toFloat
+                GameScreen phase ->
+                    case phase of
+                        Narrative ->
+                            justLastTick msg model
 
-                                newBeatTime =
-                                    if beat >= 0 then
-                                        let
-                                            tdelta =
-                                                (model.lastBeatTime + 1000) - t
-
-                                            divisor =
-                                                if tdelta >= 0 then
-                                                    2
-
-                                                else
-                                                    -2
-
-                                            avgdelta =
-                                                tdelta / divisor
-                                        in
-                                        model.lastBeatTime + 1000 + avgdelta
-
-                                    else
-                                        model.lastBeatTime
-
-                                beat =
-                                    model.beat + 1
-                            in
-                            { model | lastBeatTime = newBeatTime, beat = beat }
-
-                        Frame delta ->
-                            model
-                                |> updateSprites
-
-                        KeyPress k ->
-                            let
-                                oldChallenge =
-                                    model.challenge
-
-                                newChallenge =
-                                    if oldChallenge.action == Nothing || oldChallenge.evaluation == Failed then
-                                        oldChallenge
-
-                                    else
-                                        { oldChallenge | attempt = Just (actionForKey k) }
-                            in
-                            { model | lastKey = Just k, challenge = newChallenge }
-
-                        Tick t ->
-                            let
-                                tInMs =
-                                    t
-                                        |> Time.posixToMillis
-                                        |> toFloat
-
-                                newStartTime =
-                                    if model.start == 0.0 then
-                                        tInMs
-
-                                    else
-                                        model.start
-
-                                newLastTick =
-                                    tInMs
-
-                                newSong =
-                                    model.routine.song
-
-                                newChallenge =
+                        Dancing ->
+                            case msg of
+                                Beat tp ->
                                     let
+                                        t =
+                                            tp
+                                                |> Time.posixToMillis
+                                                |> toFloat
+
+                                        newBeatTime =
+                                            if beat >= 0 then
+                                                let
+                                                    tdelta =
+                                                        (model.lastBeatTime + 1000) - t
+
+                                                    divisor =
+                                                        if tdelta >= 0 then
+                                                            2
+
+                                                        else
+                                                            -2
+
+                                                    avgdelta =
+                                                        tdelta / divisor
+                                                in
+                                                model.lastBeatTime + 1000 + avgdelta
+
+                                            else
+                                                model.lastBeatTime
+
+                                        beat =
+                                            model.beat + 1
+                                    in
+                                    { model | lastBeatTime = newBeatTime, beat = beat }
+
+                                Frame delta ->
+                                    model
+                                        |> updateSprites
+
+                                KeyPress s ->
+                                    let
+                                        k =
+                                            s |> toKey parentmodel.config
+
+                                        oldChallenge =
+                                            model.challenge
+
+                                        newChallenge =
+                                            if oldChallenge.action == Nothing || oldChallenge.evaluation == Failed then
+                                                oldChallenge
+
+                                            else
+                                                { oldChallenge | attempt = Just (actionForKey k) }
+                                    in
+                                    { model | lastKey = Just k, challenge = newChallenge }
+
+                                Tick t ->
+                                    let
+                                        tInMs =
+                                            t
+                                                |> Time.posixToMillis
+                                                |> toFloat
+
+                                        newStartTime =
+                                            if model.start == 0.0 then
+                                                tInMs
+
+                                            else
+                                                model.start
+
+                                        newLastTick =
+                                            tInMs
+
                                         withinWindow =
                                             tInMs >= first model.challenge.timing && tInMs <= second model.challenge.timing
-                                    in
-                                    if model.beat >= 0 then
-                                        case model.challenge.evaluation of
-                                            Passed ->
-                                                if model.challenge.action == Nothing || not withinWindow then
-                                                    nextChallenge parentmodel
 
-                                                else
-                                                    model.challenge
+                                        newChallenge =
+                                            if model.beat >= 0 then
+                                                case model.challenge.evaluation of
+                                                    Passed ->
+                                                        if model.challenge.action == Nothing || not withinWindow then
+                                                            nextChallenge parentmodel
 
-                                            Indeterminate ->
-                                                let
-                                                    newEval =
-                                                        evaluationForIndeterminateChallenge model.challenge tInMs
+                                                        else
+                                                            model.challenge
 
-                                                    curChallenge =
+                                                    Indeterminate ->
+                                                        let
+                                                            newEval =
+                                                                evaluationForIndeterminateChallenge model.challenge tInMs
+
+                                                            curChallenge =
+                                                                model.challenge
+                                                        in
+                                                        { curChallenge | evaluation = newEval }
+
+                                                    Failed ->
                                                         model.challenge
-                                                in
-                                                { curChallenge | evaluation = newEval }
 
-                                            Failed ->
+                                            else
                                                 model.challenge
 
-                                    else
-                                        model.challenge
+                                        newScore =
+                                            if model.challenge /= newChallenge && model.beat > 0 then
+                                                model.score + 1
 
-                                newModel =
-                                    { model
-                                        | lastTick = newLastTick
-                                        , start = newStartTime
-                                        , challenge = newChallenge
-                                    }
-                            in
-                            newModel
-                                |> Animator.update t animator
+                                            else
+                                                model.score
 
-                        _ ->
-                            model
+                                        newModel =
+                                            { model
+                                                | lastTick = newLastTick
+                                                , score = newScore
+                                                , start = newStartTime
+                                                , challenge = newChallenge
+                                            }
+                                    in
+                                    newModel
+                                        |> Animator.update t animator
+
+                                _ ->
+                                    model
+    in
+    if model.beat > List.length model.routine.song && parentmodel.level /= Infinite then
+        case parentmodel.screen of
+            GameScreen Dancing ->
+                { parentmodel
+                    | dmodel = dmodel
+                    , screen = GameScreen Narrative
+                    , level = levelAfter parentmodel.level
+                }
+
+            _ ->
+                { parentmodel | dmodel = dmodel }
+
+    else
+        { parentmodel | dmodel = dmodel }
 
 
 type Msg
     = Tick Time.Posix
-    | KeyPress Key
+    | KeyPress String
     | Frame Float
     | Beat Time.Posix
     | ScreenTransition Screen
     | PhaseShift Phase
     | StartGame DanceModel
     | StartStory Level
+    | SettingsScreenInput ConfigSettingTextEntry
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case msg of
+        SettingsScreenInput confentry ->
+            case confentry of
+                BPMText s ->
+                    let
+                        bpm =
+                            s
+                                |> String.toFloat
+                                |> Maybe.withDefault 0.0
+                                |> clamp 0.5 3.0
+                    in
+                    ( model |> withBpm bpm
+                    , Cmd.none
+                    )
+
+                ToleranceText s ->
+                    let
+                        tolerance =
+                            s
+                                |> String.toFloat
+                                |> Maybe.withDefault 0.5
+                                |> clamp 0.0 1.0
+                    in
+                    ( model |> withTolerance tolerance
+                    , Cmd.none
+                    )
+
+                CountInText s ->
+                    let
+                        countin =
+                            s
+                                |> String.toInt
+                                |> Maybe.withDefault 0
+                                |> clamp 0 8
+                    in
+                    ( model |> withCountIn countin
+                    , Cmd.none
+                    )
+
+        KeyPress s ->
+            case model.screen of
+                GameScreen _ ->
+                    ( model |> withDanceModelForMsg msg
+                    , Cmd.none
+                    )
+
+                MenuScreen menu ->
+                    case menu of
+                        Options opt ->
+                            case opt of
+                                Just a ->
+                                    let
+                                        newmodel =
+                                            { model | screen = MenuScreen (Options Nothing) }
+                                    in
+                                    ( newmodel |> withArrow a s
+                                    , Cmd.none
+                                    )
+
+                                Nothing ->
+                                    ( model, Cmd.none )
+
+                        _ ->
+                            ( model, Cmd.none )
+
         ScreenTransition screen ->
             ( { model | screen = screen }
             , Cmd.none
@@ -375,7 +460,7 @@ update msg model =
                             danceModelFor (routineFor model.level)
                                 |> danceModelLastTickFrom dmodel.lastTick
                                 |> danceModelStartFrom dmodel.lastTick
-                                |> (\d -> { d | beat = introDelay * -1 })
+                                |> (\d -> { d | beat = 1 - model.config.countin })
                                 |> (\d -> { d | lastBeatTime = dmodel.lastTick })
                                 |> (\d -> { d | challenge = Challenge Nothing Nothing ( 0, 0 ) Passed })
                     in
@@ -387,11 +472,7 @@ update msg model =
                     )
 
         _ ->
-            let
-                dmodel =
-                    updateDanceModel msg model
-            in
-            ( { model | dmodel = dmodel }
+            ( model |> withDanceModelForMsg msg
             , Cmd.none
             )
 
@@ -475,23 +556,30 @@ idleIfBeatSubZero beat action =
 
 
 nextChallenge : Model -> Challenge
-nextChallenge mainmodel =
+nextChallenge { dmodel, config } =
     let
         model =
-            mainmodel.dmodel
+            dmodel
 
+        beatTiming : Float
         beatTiming =
-            model.lastBeatTime + 1000
+            if model.beat < 0 then
+                toFloat model.beat * -1000 + model.lastBeatTime + 1000
+
+            else
+                model.lastBeatTime + 1000
+
+        tolerance =
+            config.tolerance / 2 * 60000 / (dmodel.routine.bpm * config.bpm)
 
         timing =
-            ( beatTiming - mainmodel.config.tolerance, beatTiming + mainmodel.config.tolerance )
+            ( beatTiming - tolerance, beatTiming + tolerance )
 
         challengeBeat =
             model.beat + 1
 
         nextAction =
             getActionForBeat model.routine.song 60 model.start challengeBeat
-                |> idleIfBeatSubZero challengeBeat
 
         nextEval =
             case nextAction of
@@ -628,7 +716,7 @@ view model =
                         Title ->
                             viewTitle model
 
-                        Options ->
+                        Options jk ->
                             viewSettings model
 
                         Scores ->
@@ -666,7 +754,7 @@ titleMenu model =
     ul []
         [ li [] [ button [ Hevs.onClick (StartStory Introduction) ] [ text "begin" ] ]
         , li [] [ button [ Hevs.onClick (StartGame continuedmodel) ] [ text "continue" ] ]
-        , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Options)) ] [ text "options" ] ]
+        , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen (Options Nothing))) ] [ text "options" ] ]
 
         --, li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Scores)) ] [ text "review attempts" ] ]
         , li [] [ button [ Hevs.onClick (ScreenTransition (MenuScreen Credits)) ] [ text "credits" ] ]
@@ -679,18 +767,23 @@ backToTitleBtn =
 
 viewSettings : Model -> Html Msg
 viewSettings model =
+    let
+        recordKey : Key -> Msg
+        recordKey =
+            Just >> Options >> MenuScreen >> ScreenTransition
+    in
     section [ Hats.id "settingsScreen" ]
         [ backToTitleBtn
         , h1 [] [ text "Update settings" ]
         , div []
             (concat
-                [ settingsLabel (input [ Hats.value (stringForArrowMapping model.config.larrow) ] []) "Left Step Key"
-                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Right Step Key"
-                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Jump Key"
-                , settingsLabel (input [ Hats.value (stringForArrowMapping model.config.rarrow) ] []) "Clap Key"
-                , settingsLabel (input [ Hats.value (String.fromFloat model.config.bpm) ] []) "BPM Multiplier"
-                , settingsLabel (input [ Hats.value (String.fromFloat model.config.tolerance) ] []) "Accuracy tolerance"
-                , settingsLabel (input [ Hats.value (String.fromInt model.config.countin) ] []) "Count-in"
+                [ settingsLabel (button [ Hevs.onClick (recordKey Larrow) ] [ text ("Record over " ++ stringForArrowMapping model.config.larrow) ]) "Left Step Key"
+                , settingsLabel (button [ Hevs.onClick (recordKey Rarrow) ] [ text ("Record over " ++ stringForArrowMapping model.config.rarrow) ]) "Right Step Key"
+                , settingsLabel (button [ Hevs.onClick (recordKey Uarrow) ] [ text ("Record over " ++ stringForArrowMapping model.config.uarrow) ]) "Jump Key"
+                , settingsLabel (button [ Hevs.onClick (recordKey Darrow) ] [ text ("Record over " ++ stringForArrowMapping model.config.darrow) ]) "Clap Key"
+                , settingsLabel (input [ Hats.value (String.fromFloat model.config.bpm), Hevs.onInput (SettingsScreenInput << BPMText) ] []) "BPM Multiplier"
+                , settingsLabel (input [ Hats.value (String.fromFloat model.config.tolerance), Hevs.onInput (SettingsScreenInput << ToleranceText) ] []) "Accuracy tolerance"
+                , settingsLabel (input [ Hats.value (String.fromInt model.config.countin), Hevs.onInput (SettingsScreenInput << CountInText) ] []) "Count-in"
                 ]
             )
         ]
@@ -738,10 +831,14 @@ viewDance model =
 
             else
                 String.fromInt model.beat
+
+        score =
+            String.fromInt model.beat
     in
     main_ [ Hats.id "gaem" ]
         [ section [ Hats.id "danceScreen" ]
-            [ div [ Hats.id "dancers" ]
+            [ div [ Hats.id "score" ] [ text score ]
+            , div [ Hats.id "dancers" ]
                 (concat
                     [ List.repeat 3 (viewSprite (Animator.step model.robot <| spriteAnim))
                     , [ viewSprite (Animator.step model.dancer <| spriteAnim) ]

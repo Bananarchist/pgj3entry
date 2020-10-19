@@ -92,7 +92,18 @@ bpmFor l =
 songFor : Level -> List Action
 songFor l =
     case l of
-        _ ->
+        Introduction ->
+            [ Stepping Left
+            , Stepping Right
+            , Stepping Left
+            , Stepping Right
+            , Stepping Left
+            , Stepping Left
+            , Stepping Right
+            , Stepping Right
+            ]
+
+        Easy ->
             [ Stepping Left
             , Stepping Right
             , Jumping
@@ -103,6 +114,15 @@ songFor l =
             , Jumping
             , Clapping
             ]
+
+        Medium ->
+            List.append (songFor Introduction) (songFor Easy)
+
+        Hard ->
+            List.append (songFor Medium) (songFor Medium)
+
+        Infinite ->
+            List.append (songFor Hard) (songFor Hard)
 
 
 

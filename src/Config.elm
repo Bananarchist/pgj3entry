@@ -78,3 +78,70 @@ type Key
     | Darrow
     | Uarrow
     | Noarrow
+
+
+type ConfigSettingTextEntry
+    = BPMText String
+    | ToleranceText String
+    | CountInText String
+
+
+withBpm bpm model =
+    let
+        oldconf =
+            model.config
+
+        newconf =
+            { oldconf | bpm = bpm }
+    in
+    { model | config = newconf }
+
+
+withTolerance bpm model =
+    let
+        oldconf =
+            model.config
+
+        newconf =
+            { oldconf | tolerance = bpm }
+    in
+    { model | config = newconf }
+
+
+withCountIn bpm model =
+    let
+        oldconf =
+            model.config
+
+        newconf =
+            { oldconf | countin = bpm }
+    in
+    { model | config = newconf }
+
+
+withArrow arrow value model =
+    let
+        oldconf =
+            model.config
+
+        am =
+            ArrowMap arrow value
+
+        newconf =
+            case arrow of
+                Larrow ->
+                    { oldconf | larrow = am }
+
+                Rarrow ->
+                    { oldconf | rarrow = am }
+
+                Uarrow ->
+                    { oldconf | uarrow = am }
+
+                Darrow ->
+                    { oldconf | darrow = am }
+
+                _ ->
+                    oldconf
+    in
+    { model | config = newconf }
